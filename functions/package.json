@@ -1,0 +1,14 @@
+{
+  "name": "job-checklist-functions",
+  "description": "Cloud Function relay for AI resume tailoring (OpenAI has no CORS support, so the browser can't call it directly).",
+  "engines": {
+    "node": "20"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-functions": "^5.0.0",
+    "firebase-admin": "^12.0.0",
+    "cors": "^2.8.5"
+  },
+  "private": true
+}

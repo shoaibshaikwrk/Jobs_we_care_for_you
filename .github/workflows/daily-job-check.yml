@@ -1,0 +1,47 @@
+name: Daily Job Check
+
+on:
+  schedule:
+    # 13:00 UTC = 8:00am US Eastern / 5:00am US Pacific. Adjust as you like —
+    # https://crontab.guru is handy for editing this.
+    - cron: "0 13 * * *"
+  workflow_dispatch: {}
+  # ^ lets you trigger a run manually from the Actions tab, useful for testing.
+
+permissions:
+  contents: write
+
+jobs:
+  check-jobs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run job checker
+        env:
+          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+          USAJOBS_EMAIL: ${{ secrets.USAJOBS_EMAIL }}
+          USAJOBS_API_KEY: ${{ secrets.USAJOBS_API_KEY }}
+        run: python3 job_checker.py config.web.json
+
+      - name: Commit and push updated data/site
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/ docs/
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Daily job check: $(date -u +'%Y-%m-%d')"
+            git push
+          fi

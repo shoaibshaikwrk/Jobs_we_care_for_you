@@ -1,0 +1,14 @@
+rules_version = '2';
+
+// Each signed-in user can only read/write their own resume file, stored at
+// resumes/{their-uid}/{filename}. Nobody can see or overwrite anyone else's.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /resumes/{uid}/{fileName} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if request.auth != null && request.auth.uid == uid
+                    && request.resource.size < 10 * 1024 * 1024
+                    && request.resource.contentType.matches('application/pdf|application/msword|application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    }
+  }
+}
