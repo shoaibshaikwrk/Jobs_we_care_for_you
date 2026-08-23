@@ -27,5 +27,5 @@ const firebaseConfig = {
   //   https://us-central1-jobs-we-care-you.cloudfunctions.net/tailorResume
   // Set this to everything BEFORE the trailing "/tailorResume", e.g.:
   //   https://us-central1-jobs-we-care-you.cloudfunctions.net
-  cloudFunctionsBaseUrl: ""
+  cloudFunctionsBaseUrl: "https://us-central1-jobs-we-care-you.cloudfunctions.net"
 };
