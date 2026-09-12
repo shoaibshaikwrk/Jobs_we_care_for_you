@@ -33,6 +33,11 @@ and matched 672 real USA-based openings — enabling Adzuna and USAJobs on top o
 will push it higher still.
 
 The hosted website version (see below) also adds:
+- **Visa sponsorship signals** — each new posting is labeled `Yes`, `No`, or
+  `Not stated` using explicit wording in the available job description, with a
+  direct H1BGrader employer lookup for historical filing counts and details.
+  Historical filings are evidence of past sponsorship, not a guarantee that a
+  particular opening will sponsor.
 - **Sign-in with email, no password** — a one-time link, powered by Firebase.
 - **Shared tracking** — everyone who signs in sees the same checklist and can see
   who's applied to what ("Also: alice@x.com (Applied)").
