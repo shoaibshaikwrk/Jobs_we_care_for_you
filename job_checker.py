@@ -34,6 +34,10 @@ from urllib.parse import quote_plus
 
 import requests
 
+from h1b_dol import DEFAULT_URL as DOL_H1B_DEFAULT_URL
+from h1b_dol import load_index as load_dol_h1b_index
+from h1b_dol import lookup as lookup_dol_h1b
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.json")
 
@@ -43,7 +47,9 @@ HEADERS = {
 
 CSV_FIELDNAMES = [
     "id", "found_at", "status", "title", "company", "location", "source",
-    "visa_sponsorship", "h1bgrader_url", "url",
+    "visa_sponsorship", "dol_h1b_sponsor", "dol_h1b_lca_count",
+    "dol_h1b_worker_positions", "dol_h1b_role_lca_count", "dol_h1b_employer",
+    "h1bgrader_url", "url",
 ]
 DEFAULT_STATUS = "To Apply"
 
@@ -943,11 +949,16 @@ function render() {
     const visaTd = document.createElement("td");
     const visaStatus = document.createElement("div");
     visaStatus.textContent = "Posting: " + (job.visa_sponsorship || "Not stated");
+    const dolStatus = document.createElement("div");
+    dolStatus.textContent = job.dol_h1b_sponsor === "Yes"
+      ? "DOL FY2026: " + job.dol_h1b_lca_count + " certified LCAs / " +
+        job.dol_h1b_worker_positions + " worker positions; role matches: " + job.dol_h1b_role_lca_count
+      : "DOL FY2026: no employer match";
     const h1bLink = document.createElement("a");
     h1bLink.href = job.h1bgrader_url; h1bLink.target = "_blank"; h1bLink.rel = "noopener";
     h1bLink.textContent = "H1BGrader filing count";
     h1bLink.title = "Historical filings do not guarantee sponsorship for this opening";
-    visaTd.appendChild(visaStatus); visaTd.appendChild(h1bLink);
+    visaTd.appendChild(visaStatus); visaTd.appendChild(dolStatus); visaTd.appendChild(h1bLink);
     tr.appendChild(visaTd);
 
     const locTd = document.createElement("td");
@@ -1574,11 +1585,16 @@ function render() {
     const visaTd = document.createElement("td");
     const visaStatus = document.createElement("div");
     visaStatus.textContent = "Posting: " + (job.visa_sponsorship || "Not stated");
+    const dolStatus = document.createElement("div");
+    dolStatus.textContent = job.dol_h1b_sponsor === "Yes"
+      ? "DOL FY2026: " + job.dol_h1b_lca_count + " certified LCAs / " +
+        job.dol_h1b_worker_positions + " worker positions; role matches: " + job.dol_h1b_role_lca_count
+      : "DOL FY2026: no employer match";
     const h1bLink = document.createElement("a");
     h1bLink.href = job.h1bgrader_url; h1bLink.target = "_blank"; h1bLink.rel = "noopener";
     h1bLink.textContent = "H1BGrader filing count";
     h1bLink.title = "Historical filings do not guarantee sponsorship for this opening";
-    visaTd.appendChild(visaStatus); visaTd.appendChild(h1bLink);
+    visaTd.appendChild(visaStatus); visaTd.appendChild(dolStatus); visaTd.appendChild(h1bLink);
     tr.appendChild(visaTd);
 
     const locTd = document.createElement("td");
@@ -1781,6 +1797,24 @@ def main():
     print(f"Jobs matching your keywords/filters: {len(filtered)}"
           f" (excluded {usa_filtered_out} non-USA/ambiguous-location jobs)")
 
+    dol_cfg = sources_cfg.get("dol_h1b", {})
+    if dol_cfg.get("enabled"):
+        try:
+            print("Loading official DOL H-1B sponsorship index...")
+            dol_index = load_dol_h1b_index(
+                dol_cfg.get("url") or DOL_H1B_DEFAULT_URL,
+                dol_cfg.get("cache_dir", ".cache/h1b"),
+            )
+            for job in filtered:
+                job.update(lookup_dol_h1b(job.get("company", ""), job.get("title", ""), dol_index))
+        except Exception as error:
+            print(f"  [dol_h1b] enrichment failed: {error}")
+            for job in filtered:
+                job.update(lookup_dol_h1b("", "", {}))
+    else:
+        for job in filtered:
+            job.update(lookup_dol_h1b("", "", {}))
+
     # Dedup against previously seen jobs
     seen_ids = load_seen(seen_path)
     new_jobs = [j for j in filtered if j["id"] not in seen_ids]
@@ -1805,6 +1839,11 @@ def main():
                     "location": job["location"],
                     "source": job["source"],
                     "visa_sponsorship": job["visa_sponsorship"],
+                    "dol_h1b_sponsor": job["dol_h1b_sponsor"],
+                    "dol_h1b_lca_count": job["dol_h1b_lca_count"],
+                    "dol_h1b_worker_positions": job["dol_h1b_worker_positions"],
+                    "dol_h1b_role_lca_count": job["dol_h1b_role_lca_count"],
+                    "dol_h1b_employer": job["dol_h1b_employer"],
                     "h1bgrader_url": job["h1bgrader_url"],
                     "url": job["url"],
                 })
@@ -1826,6 +1865,10 @@ def main():
             all_rows = []
         for row in all_rows:
             row["visa_sponsorship"] = row.get("visa_sponsorship") or "Not stated"
+            row["dol_h1b_sponsor"] = row.get("dol_h1b_sponsor") or "No match"
+            row["dol_h1b_lca_count"] = row.get("dol_h1b_lca_count") or "0"
+            row["dol_h1b_worker_positions"] = row.get("dol_h1b_worker_positions") or "0"
+            row["dol_h1b_role_lca_count"] = row.get("dol_h1b_role_lca_count") or "0"
             row["h1bgrader_url"] = (
                 row.get("h1bgrader_url") or h1bgrader_lookup_url(row.get("company", ""))
             )
