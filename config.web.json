@@ -142,6 +142,12 @@
       "optics11",
       "snapsoft"
     ],
+    "dol_h1b": {
+      "enabled": true,
+      "url": "https://www.dol.gov/media/LCA_Disclosure_Data_FY2026_Q3.xlsx",
+      "cache_dir": ".cache/h1b",
+      "_note": "Official cumulative FY2026 Q3 LCA disclosure data through June 30, 2026."
+    },
     "adzuna": {
       "enabled": false,
       "app_id": "",
