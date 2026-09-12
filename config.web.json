@@ -15,7 +15,28 @@
     "generative ai engineer",
     "llm engineer",
     "ai infrastructure",
-    "machine learning infrastructure"
+    "machine learning infrastructure",
+    "devops engineer",
+    "devops analyst",
+    "devsecops engineer",
+    "site reliability engineer",
+    "site reliability analyst",
+    "cloud devops engineer",
+    "qa analyst",
+    "quality assurance analyst",
+    "software quality analyst",
+    "software test analyst",
+    "fhir analyst",
+    "fhir business analyst",
+    "healthcare interoperability analyst",
+    "healthcare integration analyst",
+    "hl7 fhir analyst",
+    "product manager",
+    "technical product manager",
+    "digital product manager",
+    "platform product manager",
+    "data product manager",
+    "ai product manager"
   ],
   "exclude_keywords": [
     "intern",
@@ -125,13 +146,13 @@
       "enabled": false,
       "app_id": "",
       "app_key": "",
-      "_note": "Leave blank here. Add ADZUNA_APP_ID / ADZUNA_APP_KEY as GitHub repo secrets instead \u2014 the workflow passes them in as environment variables so no key is ever committed to the repo."
+      "_note": "Leave blank here. Add ADZUNA_APP_ID / ADZUNA_APP_KEY as GitHub repo secrets instead — the workflow passes them in as environment variables so no key is ever committed to the repo."
     },
     "usajobs": {
       "enabled": false,
       "email": "",
       "api_key": "",
-      "_note": "Leave blank here. Add USAJOBS_EMAIL / USAJOBS_API_KEY as GitHub repo secrets instead \u2014 same reasoning as Adzuna above."
+      "_note": "Leave blank here. Add USAJOBS_EMAIL / USAJOBS_API_KEY as GitHub repo secrets instead — same reasoning as Adzuna above."
     },
     "amazon": true,
     "netflix": true,
