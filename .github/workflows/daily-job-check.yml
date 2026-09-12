@@ -7,6 +7,14 @@ on:
     - cron: "0 13 * * *"
   workflow_dispatch: {}
   # ^ lets you trigger a run manually from the Actions tab, useful for testing.
+  push:
+    branches: [main]
+    paths:
+      - "job_checker.py"
+      - "h1b_dol.py"
+      - "config.web.json"
+      - "requirements.txt"
+      - ".github/workflows/daily-job-check.yml"
 
 permissions:
   contents: write
