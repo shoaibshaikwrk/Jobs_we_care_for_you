@@ -38,6 +38,10 @@ The hosted website version (see below) also adds:
   direct H1BGrader employer lookup for historical filing counts and details.
   Historical filings are evidence of past sponsorship, not a guarantee that a
   particular opening will sponsor.
+- **Official DOL H-1B history** — the hosted run enriches new jobs from the
+  cumulative FY2026 Q3 LCA disclosure file with certified LCA counts, requested
+  worker positions, and same-role filing counts. The 240 MB source workbook is
+  cached by GitHub Actions and is never committed to this repository.
 - **Sign-in with email, no password** — a one-time link, powered by Firebase.
 - **Shared tracking** — everyone who signs in sees the same checklist and can see
   who's applied to what ("Also: alice@x.com (Applied)").
