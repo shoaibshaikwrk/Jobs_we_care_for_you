@@ -26,6 +26,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Restore DOL H-1B data cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/h1b
+          key: dol-h1b-fy2026-q3-v1
+
       - name: Run job checker
         env:
           ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
