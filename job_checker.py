@@ -30,6 +30,7 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
+from urllib.parse import quote_plus
 
 import requests
 
@@ -40,8 +41,65 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; JobChecker/1.0; +local-script)"
 }
 
-CSV_FIELDNAMES = ["id", "found_at", "status", "title", "company", "location", "source", "url"]
+CSV_FIELDNAMES = [
+    "id", "found_at", "status", "title", "company", "location", "source",
+    "visa_sponsorship", "h1bgrader_url", "url",
+]
 DEFAULT_STATUS = "To Apply"
+
+VISA_NO_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE) for pattern in [
+        r"(?:do|does|will) not (?:provide|offer|sponsor).*?(?:visa|immigration|h-?1b)",
+        r"(?:no|without) (?:visa|immigration) sponsorship",
+        r"not eligible for (?:visa|immigration) sponsorship",
+        r"authorized to work.*?without.*?sponsorship",
+        r"unable to sponsor",
+    ]
+]
+VISA_YES_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE) for pattern in [
+        r"(?:visa|immigration) sponsorship (?:is )?(?:available|provided|offered)",
+        r"(?:provide|offer|eligible for).*?(?:visa|immigration) sponsorship",
+        r"sponsor(?:ing|ship)?(?:.{0,30})h-?1b",
+        r"h-?1b(?:.{0,30})sponsor",
+    ]
+]
+
+
+def detect_visa_sponsorship(description):
+    """Classify only explicit language in a posting; never infer from history."""
+    text = re.sub(r"<[^>]+>", " ", description or "")
+    if any(pattern.search(text) for pattern in VISA_NO_PATTERNS):
+        return "No"
+    if any(pattern.search(text) for pattern in VISA_YES_PATTERNS):
+        return "Yes"
+    return "Not stated"
+
+
+def h1bgrader_lookup_url(company):
+    """Link to H1BGrader results where filing counts and history can be reviewed."""
+    return (
+        "https://h1bgrader.com/jobs/search?keyword="
+        f"{quote_plus(company or '')}&limit=25&location=&page=1"
+    )
+
+
+def ensure_csv_schema(path):
+    """Add newly introduced columns without losing existing checklist rows."""
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        return
+    with open(path, "r", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+        current_fields = reader.fieldnames or []
+    if current_fields == CSV_FIELDNAMES:
+        return
+    temp_path = path + ".schema-update"
+    with open(temp_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+    os.replace(temp_path, path)
 
 # ---------------------------------------------------------------------------
 # USA location detection
@@ -185,6 +243,7 @@ def fetch_remoteok():
                 "location": item.get("location", "Remote"),
                 "url": item.get("url", ""),
                 "source": "RemoteOK",
+                "description": item.get("description", ""),
                 "us_confirmed": False,
             })
     except Exception as e:
@@ -208,6 +267,7 @@ def fetch_arbeitnow():
                 "location": item.get("location", ""),
                 "url": item.get("url", ""),
                 "source": "Arbeitnow",
+                "description": item.get("description", ""),
                 "us_confirmed": False,
             })
     except Exception as e:
@@ -219,7 +279,7 @@ def fetch_greenhouse(company):
     jobs = []
     try:
         resp = requests.get(
-            f"https://boards-api.greenhouse.io/v1/boards/{company}/jobs",
+            f"https://boards-api.greenhouse.io/v1/boards/{company}/jobs?content=true",
             headers=HEADERS,
             timeout=20,
         )
@@ -236,6 +296,7 @@ def fetch_greenhouse(company):
                 "location": (item.get("location") or {}).get("name", ""),
                 "url": item.get("absolute_url", ""),
                 "source": "Greenhouse",
+                "description": item.get("content", ""),
                 "us_confirmed": False,
             })
     except Exception as e:
@@ -264,6 +325,7 @@ def fetch_lever(company):
                 "location": (item.get("categories") or {}).get("location", ""),
                 "url": item.get("hostedUrl", ""),
                 "source": "Lever",
+                "description": item.get("descriptionPlain") or item.get("description", ""),
                 "us_confirmed": False,
             })
     except Exception as e:
@@ -292,6 +354,7 @@ def fetch_ashby(company):
                 "location": item.get("location", ""),
                 "url": item.get("jobUrl", ""),
                 "source": "Ashby",
+                "description": item.get("descriptionPlain") or item.get("descriptionHtml", ""),
                 "us_confirmed": False,
             })
     except Exception as e:
@@ -663,6 +726,7 @@ def fetch_adzuna(app_id, app_key, keywords, results_per_keyword=50):
                     "location": (item.get("location") or {}).get("display_name", ""),
                     "url": item.get("redirect_url", ""),
                     "source": "Adzuna",
+                    "description": item.get("description", ""),
                     "us_confirmed": True,
                 })
         except Exception as e:
@@ -792,6 +856,7 @@ def generate_html(rows, output_path):
     <tr>
       <th>Status</th>
       <th>Role</th>
+      <th>Visa / H-1B history</th>
       <th>Location</th>
       <th>Source</th>
       <th>Found</th>
@@ -874,6 +939,16 @@ function render() {
     companyDiv.className = "company"; companyDiv.textContent = job.company;
     roleTd.appendChild(link); roleTd.appendChild(companyDiv);
     tr.appendChild(roleTd);
+
+    const visaTd = document.createElement("td");
+    const visaStatus = document.createElement("div");
+    visaStatus.textContent = "Posting: " + (job.visa_sponsorship || "Not stated");
+    const h1bLink = document.createElement("a");
+    h1bLink.href = job.h1bgrader_url; h1bLink.target = "_blank"; h1bLink.rel = "noopener";
+    h1bLink.textContent = "H1BGrader filing count";
+    h1bLink.title = "Historical filings do not guarantee sponsorship for this opening";
+    visaTd.appendChild(visaStatus); visaTd.appendChild(h1bLink);
+    tr.appendChild(visaTd);
 
     const locTd = document.createElement("td");
     locTd.textContent = job.location || "";
@@ -1058,6 +1133,7 @@ def generate_html_auth(rows, output_path, resume_url=""):
       <tr>
         <th>Your Status</th>
         <th>Role</th>
+        <th>Visa / H-1B history</th>
         <th>Location</th>
         <th>Source</th>
         <th>Found</th>
@@ -1495,6 +1571,16 @@ function render() {
     roleTd.appendChild(link); roleTd.appendChild(companyDiv);
     tr.appendChild(roleTd);
 
+    const visaTd = document.createElement("td");
+    const visaStatus = document.createElement("div");
+    visaStatus.textContent = "Posting: " + (job.visa_sponsorship || "Not stated");
+    const h1bLink = document.createElement("a");
+    h1bLink.href = job.h1bgrader_url; h1bLink.target = "_blank"; h1bLink.rel = "noopener";
+    h1bLink.textContent = "H1BGrader filing count";
+    h1bLink.title = "Historical filings do not guarantee sponsorship for this opening";
+    visaTd.appendChild(visaStatus); visaTd.appendChild(h1bLink);
+    tr.appendChild(visaTd);
+
     const locTd = document.createElement("td");
     locTd.textContent = job.location || "";
     tr.appendChild(locTd);
@@ -1688,6 +1774,8 @@ def main():
         if usa_only and not job.get("us_confirmed") and not is_usa_location(job["location"]):
             usa_filtered_out += 1
             continue
+        job["visa_sponsorship"] = detect_visa_sponsorship(job.get("description", ""))
+        job["h1bgrader_url"] = h1bgrader_lookup_url(job.get("company", ""))
         filtered.append(job)
 
     print(f"Jobs matching your keywords/filters: {len(filtered)}"
@@ -1700,6 +1788,7 @@ def main():
     print(f"NEW jobs since last run: {len(new_jobs)}")
 
     if new_jobs:
+        ensure_csv_schema(output_csv)
         file_exists = os.path.exists(output_csv)
         with open(output_csv, "a", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES)
@@ -1715,6 +1804,8 @@ def main():
                     "company": job["company"],
                     "location": job["location"],
                     "source": job["source"],
+                    "visa_sponsorship": job["visa_sponsorship"],
+                    "h1bgrader_url": job["h1bgrader_url"],
                     "url": job["url"],
                 })
                 seen_ids.add(job["id"])
@@ -1733,6 +1824,11 @@ def main():
                 all_rows = list(csv.DictReader(f))
         else:
             all_rows = []
+        for row in all_rows:
+            row["visa_sponsorship"] = row.get("visa_sponsorship") or "Not stated"
+            row["h1bgrader_url"] = (
+                row.get("h1bgrader_url") or h1bgrader_lookup_url(row.get("company", ""))
+            )
         if config.get("enable_auth"):
             generate_html_auth(all_rows, html_path, config.get("resume_url", ""))
         else:
