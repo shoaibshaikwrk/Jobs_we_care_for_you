@@ -29,7 +29,9 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timezone
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from urllib.parse import quote_plus
 
 import requests
@@ -106,6 +108,36 @@ def ensure_csv_schema(path):
         writer.writeheader()
         writer.writerows(rows)
     os.replace(temp_path, path)
+
+
+def deduplicate_csv(path):
+    """Remove repeated job IDs while preserving and merging the richest row."""
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        return 0
+    ensure_csv_schema(path)
+    with open(path, "r", newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    merged = {}
+    order = []
+    for row in rows:
+        job_id = row.get("id", "")
+        if job_id not in merged:
+            merged[job_id] = row
+            order.append(job_id)
+            continue
+        existing = merged[job_id]
+        for field, value in row.items():
+            if value and not existing.get(field):
+                existing[field] = value
+    removed = len(rows) - len(order)
+    if removed:
+        temp_path = path + ".deduplicated"
+        with open(temp_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(merged[job_id] for job_id in order)
+        os.replace(temp_path, path)
+    return removed
 
 # ---------------------------------------------------------------------------
 # USA location detection
@@ -278,6 +310,63 @@ def fetch_arbeitnow():
             })
     except Exception as e:
         print(f"  [arbeitnow] fetch failed: {e}")
+    return jobs
+
+
+def fetch_jobicy(keywords, results_per_keyword=50):
+    """Jobicy's public API; source attribution and links are preserved."""
+    jobs = []
+    for keyword in keywords:
+        try:
+            response = requests.get(
+                "https://jobicy.com/api/v2/remote-jobs",
+                params={"count": results_per_keyword, "geo": "usa", "tag": keyword},
+                headers=HEADERS,
+                timeout=20,
+            )
+            response.raise_for_status()
+            for item in response.json().get("jobs", []):
+                jobs.append({
+                    "id": f"jobicy_{item.get('id')}",
+                    "title": item.get("jobTitle", ""),
+                    "company": item.get("companyName", ""),
+                    "location": item.get("jobGeo", "USA"),
+                    "url": item.get("url", ""),
+                    "source": "Jobicy",
+                    "description": item.get("jobDescription", ""),
+                    "us_confirmed": True,
+                })
+        except Exception as error:
+            print(f"  [jobicy:{keyword}] fetch failed: {error}")
+    return jobs
+
+
+def fetch_himalayas(results_limit=1000):
+    """Latest remote roles from the free public Himalayas feed."""
+    jobs = []
+    try:
+        response = requests.get(
+            "https://himalayas.app/jobs/api",
+            params={"limit": results_limit},
+            headers=HEADERS,
+            timeout=30,
+        )
+        response.raise_for_status()
+        for item in response.json().get("jobs", []):
+            restrictions = item.get("locationRestrictions") or []
+            location = ", ".join(restrictions) or "Remote"
+            jobs.append({
+                "id": f"himalayas_{item.get('guid') or item.get('applicationLink')}",
+                "title": item.get("title", ""),
+                "company": item.get("companyName", ""),
+                "location": location,
+                "url": item.get("applicationLink", ""),
+                "source": "Himalayas",
+                "description": item.get("description", ""),
+                "us_confirmed": any("united states" in str(value).lower() for value in restrictions),
+            })
+    except Exception as error:
+        print(f"  [himalayas] fetch failed: {error}")
     return jobs
 
 
@@ -784,7 +873,53 @@ def fetch_usajobs(email, api_key, keywords, results_per_keyword=50):
     return jobs
 
 
-def generate_html(rows, output_path):
+NEWS_FEEDS = {
+    "H-1B News": "https://news.google.com/rss/search?q=H-1B+visa+when:7d&hl=en-US&gl=US&ceid=US:en",
+    "Jobs News": "https://news.google.com/rss/search?q=US+jobs+hiring+technology+when:7d&hl=en-US&gl=US&ceid=US:en",
+    "Technology News": "https://news.google.com/rss/search?q=AI+technology+data+engineering+when:7d&hl=en-US&gl=US&ceid=US:en",
+}
+
+
+def fetch_weekly_news(items_per_section=8):
+    """Fetch headline metadata only; readers always open the original article."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    sections = {}
+    for section, url in NEWS_FEEDS.items():
+        items = []
+        seen_titles = set()
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=20)
+            response.raise_for_status()
+            root = ET.fromstring(response.content)
+            for item in root.findall(".//item"):
+                title = (item.findtext("title") or "").strip()
+                link = (item.findtext("link") or "").strip()
+                published = (item.findtext("pubDate") or "").strip()
+                source_node = item.find("source")
+                source = (source_node.text or "").strip() if source_node is not None else ""
+                try:
+                    published_dt = parsedate_to_datetime(published)
+                    if published_dt.tzinfo is None:
+                        published_dt = published_dt.replace(tzinfo=timezone.utc)
+                    if published_dt < cutoff:
+                        continue
+                    display_date = published_dt.strftime("%b %d")
+                except (TypeError, ValueError):
+                    display_date = "This week"
+                key = title.lower()
+                if not title or not link or key in seen_titles:
+                    continue
+                seen_titles.add(key)
+                items.append({"title": title, "url": link, "source": source, "date": display_date})
+                if len(items) >= items_per_section:
+                    break
+        except Exception as error:
+            print(f"  [news:{section}] fetch failed: {error}")
+        sections[section] = items
+    return sections
+
+
+def generate_html(rows, output_path, news=None):
     """Build a single self-contained HTML checklist page from the full job
     history (every row ever appended to the CSV, oldest included). The job
     data is embedded directly as inline JSON so the page works both as a
@@ -797,6 +932,7 @@ def generate_html(rows, output_path):
     """
     rows_sorted = sorted(rows, key=lambda r: r.get("found_at", ""), reverse=True)
     jobs_json = json.dumps(rows_sorted, ensure_ascii=False)
+    news_json = json.dumps(news or {}, ensure_ascii=False)
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     html = """<!DOCTYPE html>
@@ -804,7 +940,7 @@ def generate_html(rows, output_path):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Data Engineer / AI Engineer Job Checklist</title>
+<title>Top FAANGOS Jobs</title>
 <style>
   :root { color-scheme: light dark; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -836,10 +972,22 @@ def generate_html(rows, output_path):
   .filter-row th { top: 38px; padding: 5px 6px; }
   .column-filter { width: 100%; min-width: 85px; box-sizing: border-box; padding: 5px 7px;
                    border: 1px solid #bbb; border-radius: 5px; font-size: 0.78rem; }
+  .content-grid { display: grid; grid-template-columns: minmax(0,1fr) 330px; gap: 18px; align-items: start; }
+  .table-panel { min-width: 0; overflow-x: auto; }
+  .news-sidebar { max-height: 720px; overflow-y: auto; position: sticky; top: 12px; border: 1px solid #ccc;
+                  border-radius: 10px; padding: 12px; background: Canvas; }
+  .news-sidebar h2 { margin: 0 0 4px; font-size: 1.1rem; }
+  .news-section h3 { margin: 14px 0 6px; font-size: .95rem; }
+  .news-item { padding: 8px 0; border-bottom: 1px solid #ddd; }
+  .news-item a { font-size: .84rem; font-weight: 600; text-decoration: none; }
+  .news-meta { color: #777; font-size: .72rem; margin-top: 3px; }
+  .motto { font-style: italic; margin: 4px 0 12px; color: #555; }
+  @media (max-width: 900px) { .content-grid { grid-template-columns: 1fr; } .news-sidebar { position: static; max-height: 420px; } }
 </style>
 </head>
 <body>
-<h1>Data Engineer / AI Engineer Job Checklist</h1>
+<h1>Top FAANGOS Jobs</h1>
+<div class="motto">“We chop our own wood, so we warm ourselves twice.”</div>
 <div class="meta">Last updated __GENERATED_AT__ &middot; regenerated automatically once a day</div>
 
 <div class="stats" id="stats"></div>
@@ -860,7 +1008,7 @@ def generate_html(rows, output_path):
   </select>
 </div>
 
-<table>
+<div class="content-grid"><div class="table-panel"><table>
   <thead>
     <tr>
       <th>Status</th>
@@ -880,15 +1028,33 @@ def generate_html(rows, output_path):
     </tr>
   </thead>
   <tbody id="jobRows"></tbody>
-</table>
+</table></div><aside class="news-sidebar"><h2>Top News This Week</h2><div id="newsSections"></div></aside></div>
 
 <script>
 const JOBS = __JOBS_JSON__;
+const NEWS = __NEWS_JSON__;
 const STATUS_OPTIONS = ["To Apply", "Applied", "Interview Scheduled", "Interviewed", "Offer", "Rejected"];
 const STORAGE_PREFIX = "jobchecklist_status_";
 
 function getStatus(job) {
   return localStorage.getItem(STORAGE_PREFIX + job.id) || job.status || "To Apply";
+}
+
+function renderNews() {
+  const container = document.getElementById("newsSections");
+  Object.entries(NEWS).forEach(([section, items]) => {
+    const block = document.createElement("section"); block.className = "news-section";
+    const heading = document.createElement("h3"); heading.textContent = section; block.appendChild(heading);
+    items.forEach(item => {
+      const card = document.createElement("div"); card.className = "news-item";
+      const link = document.createElement("a"); link.href = item.url; link.target = "_blank";
+      link.rel = "noopener"; link.textContent = item.title; card.appendChild(link);
+      const meta = document.createElement("div"); meta.className = "news-meta";
+      meta.textContent = [item.source, item.date].filter(Boolean).join(" · "); card.appendChild(meta);
+      block.appendChild(card);
+    });
+    container.appendChild(block);
+  });
 }
 function setStatus(jobId, status) {
   localStorage.setItem(STORAGE_PREFIX + jobId, status);
@@ -1014,12 +1180,14 @@ document.getElementById("statusFilter").addEventListener("change", render);
 document.getElementById("sourceFilter").addEventListener("change", render);
 document.querySelectorAll(".column-filter").forEach(input => input.addEventListener("input", render));
 render();
+renderNews();
 </script>
 </body>
 </html>
 """
     html = html.replace("__GENERATED_AT__", generated_at)
     html = html.replace("__JOBS_JSON__", jobs_json)
+    html = html.replace("__NEWS_JSON__", news_json)
 
     folder = os.path.dirname(output_path)
     if folder:
@@ -1028,7 +1196,7 @@ render();
         f.write(html)
 
 
-def generate_html_auth(rows, output_path, resume_url=""):
+def generate_html_auth(rows, output_path, resume_url="", news=None):
     """Like generate_html(), but gates the checklist behind Firebase passwordless
     email-link sign-in and stores each job's status in Firestore (keyed by job id
     + signed-in email) instead of localStorage. This means:
@@ -1055,6 +1223,7 @@ def generate_html_auth(rows, output_path, resume_url=""):
     """
     rows_sorted = sorted(rows, key=lambda r: r.get("found_at", ""), reverse=True)
     jobs_json = json.dumps(rows_sorted, ensure_ascii=False)
+    news_json = json.dumps(news or {}, ensure_ascii=False)
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     html = """<!DOCTYPE html>
@@ -1062,7 +1231,7 @@ def generate_html_auth(rows, output_path, resume_url=""):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Data Engineer / AI Engineer Job Checklist</title>
+<title>Top FAANGOS Jobs</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
@@ -1093,6 +1262,17 @@ def generate_html_auth(rows, output_path, resume_url=""):
   .filter-row th { top: 38px; padding: 5px 6px; }
   .column-filter { width: 100%; min-width: 85px; box-sizing: border-box; padding: 5px 7px;
                    border: 1px solid #bbb; border-radius: 5px; font-size: 0.78rem; }
+  .content-grid { display: grid; grid-template-columns: minmax(0,1fr) 330px; gap: 18px; align-items: start; }
+  .table-panel { min-width: 0; overflow-x: auto; }
+  .news-sidebar { max-height: 720px; overflow-y: auto; position: sticky; top: 12px; border: 1px solid #ccc;
+                  border-radius: 10px; padding: 12px; background: Canvas; }
+  .news-sidebar h2 { margin: 0 0 4px; font-size: 1.1rem; }
+  .news-section h3 { margin: 14px 0 6px; font-size: .95rem; }
+  .news-item { padding: 8px 0; border-bottom: 1px solid #ddd; }
+  .news-item a { font-size: .84rem; font-weight: 600; text-decoration: none; }
+  .news-meta { color: #777; font-size: .72rem; margin-top: 3px; }
+  .motto { font-style: italic; margin: 4px 0 12px; color: #555; }
+  @media (max-width: 900px) { .content-grid { grid-template-columns: 1fr; } .news-sidebar { position: static; max-height: 420px; } }
   .topbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
   .topbar-right { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; }
   .btn { display: inline-block; padding: 8px 16px; border-radius: 6px; border: 1px solid #888;
@@ -1132,7 +1312,7 @@ def generate_html_auth(rows, output_path, resume_url=""):
 <body>
 
 <div id="loginScreen">
-  <h1>Data Engineer / AI Engineer Job Checklist</h1>
+  <h1>Top FAANGOS Jobs</h1>
   <p>Sign in with your email to view the checklist and track who's applied where.
      No password — we'll email you a one-time sign-in link.</p>
   <input type="email" id="emailInput" placeholder="you@example.com">
@@ -1143,7 +1323,8 @@ def generate_html_auth(rows, output_path, resume_url=""):
 <div id="appScreen" class="hidden">
   <div class="topbar">
     <div>
-      <h1>Data Engineer / AI Engineer Job Checklist</h1>
+      <h1>Top FAANGOS Jobs</h1>
+      <div class="motto">“We chop our own wood, so we warm ourselves twice.”</div>
       <div class="meta">Last updated __GENERATED_AT__ &middot; regenerated automatically once a day</div>
     </div>
     <div class="topbar-right">
@@ -1172,7 +1353,7 @@ def generate_html_auth(rows, output_path, resume_url=""):
     </select>
   </div>
 
-  <table>
+  <div class="content-grid"><div class="table-panel"><table>
     <thead>
       <tr>
         <th>Your Status</th>
@@ -1194,7 +1375,7 @@ def generate_html_auth(rows, output_path, resume_url=""):
       </tr>
     </thead>
     <tbody id="jobRows"></tbody>
-  </table>
+  </table></div><aside class="news-sidebar"><h2>Top News This Week</h2><div id="newsSections"></div></aside></div>
 </div>
 
 <div id="settingsBackdrop" class="drawer-backdrop hidden"></div>
@@ -1244,6 +1425,7 @@ def generate_html_auth(rows, output_path, resume_url=""):
 
 <script>
 const JOBS = __JOBS_JSON__;
+const NEWS = __NEWS_JSON__;
 const STATUS_OPTIONS = ["To Apply", "Applied", "Interview Scheduled", "Interviewed", "Offer", "Rejected"];
 
 // firebaseConfig comes from firebase-config.js, loaded before this script.
@@ -1542,6 +1724,23 @@ function getMyStatus(jobId) {
   return mine ? mine.status : "To Apply";
 }
 
+function renderNews() {
+  const container = document.getElementById("newsSections");
+  Object.entries(NEWS).forEach(([section, items]) => {
+    const block = document.createElement("section"); block.className = "news-section";
+    const heading = document.createElement("h3"); heading.textContent = section; block.appendChild(heading);
+    items.forEach(item => {
+      const card = document.createElement("div"); card.className = "news-item";
+      const link = document.createElement("a"); link.href = item.url; link.target = "_blank";
+      link.rel = "noopener"; link.textContent = item.title; card.appendChild(link);
+      const meta = document.createElement("div"); meta.className = "news-meta";
+      meta.textContent = [item.source, item.date].filter(Boolean).join(" · "); card.appendChild(meta);
+      block.appendChild(card);
+    });
+    container.appendChild(block);
+  });
+}
+
 function getOthersText(jobId) {
   const entries = statusByJob[jobId] || [];
   const others = entries.filter(e => e.email !== currentEmail && e.status !== "To Apply");
@@ -1697,6 +1896,7 @@ async function showApp() {
   document.getElementById("sourceFilter").addEventListener("change", render);
   document.querySelectorAll(".column-filter").forEach(input => input.addEventListener("input", render));
   render();
+  renderNews();
 }
 
 // Handle arriving via the emailed sign-in link
@@ -1729,6 +1929,7 @@ if (auth.isSignInWithEmailLink(window.location.href)) {
 """
     html = html.replace("__GENERATED_AT__", generated_at)
     html = html.replace("__JOBS_JSON__", jobs_json)
+    html = html.replace("__NEWS_JSON__", news_json)
     html = html.replace(
         "__DEFAULT_RESUME_HINT__",
         "not a shared default — each signed-in user uploads and sees only their own",
@@ -1777,6 +1978,14 @@ def main():
     if sources_cfg.get("arbeitnow"):
         print("Fetching Arbeitnow...")
         all_jobs.extend(fetch_arbeitnow())
+
+    if sources_cfg.get("jobicy"):
+        print("Fetching Jobicy...")
+        all_jobs.extend(fetch_jobicy(keywords))
+
+    if sources_cfg.get("himalayas"):
+        print("Fetching Himalayas...")
+        all_jobs.extend(fetch_himalayas())
 
     for company in sources_cfg.get("greenhouse_companies", []):
         print(f"Fetching Greenhouse board: {company}...")
@@ -1858,6 +2067,18 @@ def main():
     print(f"Jobs matching your keywords/filters: {len(filtered)}"
           f" (excluded {usa_filtered_out} non-USA/ambiguous-location jobs)")
 
+    # A source can return the same posting for several keyword searches. Keep
+    # one copy before comparing with prior runs or writing to the CSV.
+    filtered_by_id = {}
+    for job in filtered:
+        job_id = job.get("id")
+        if job_id not in filtered_by_id:
+            filtered_by_id[job_id] = job
+        elif len(job.get("description", "")) > len(filtered_by_id[job_id].get("description", "")):
+            filtered_by_id[job_id] = job
+    filtered = list(filtered_by_id.values())
+    print(f"Unique matching jobs in this run: {len(filtered)}")
+
     dol_cfg = sources_cfg.get("dol_h1b", {})
     if dol_cfg.get("enabled"):
         try:
@@ -1875,6 +2096,10 @@ def main():
     else:
         for job in filtered:
             job.update(lookup_dol_h1b("", "", {}))
+
+    removed_duplicates = deduplicate_csv(output_csv)
+    if removed_duplicates:
+        log(f"Removed {removed_duplicates} duplicate row(s) from {output_csv}", log_path)
 
     # Dedup against previously seen jobs
     seen_ids = load_seen(seen_path)
@@ -1918,6 +2143,7 @@ def main():
 
     output_html = config.get("output_html")
     if output_html:
+        news = fetch_weekly_news()
         html_path = os.path.join(script_dir, output_html)
         if os.path.exists(output_csv):
             with open(output_csv, "r", newline="", encoding="utf-8") as f:
@@ -1934,9 +2160,9 @@ def main():
                 row.get("h1bgrader_url") or h1bgrader_lookup_url(row.get("company", ""))
             )
         if config.get("enable_auth"):
-            generate_html_auth(all_rows, html_path, config.get("resume_url", ""))
+            generate_html_auth(all_rows, html_path, config.get("resume_url", ""), news)
         else:
-            generate_html(all_rows, html_path)
+            generate_html(all_rows, html_path, news)
         log(f"Regenerated checklist page at {html_path} ({len(all_rows)} total jobs)", log_path)
 
     log("Run complete.\n", log_path)
