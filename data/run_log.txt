@@ -348,3 +348,9 @@
 [2026-09-13 01:03:57 UTC] Regenerated checklist page at /home/runner/work/Jobs_we_care_for_you/Jobs_we_care_for_you/docs/index.html (2120 total jobs)
 [2026-09-13 01:03:57 UTC] Run complete.
 
+[2026-09-13 01:22:45 UTC] Starting job check run...
+[2026-09-13 01:25:11 UTC] Removed 487 duplicate row(s) from /home/runner/work/Jobs_we_care_for_you/Jobs_we_care_for_you/data/jobs_found.csv
+[2026-09-13 01:25:11 UTC] Added 87 new job(s) to /home/runner/work/Jobs_we_care_for_you/Jobs_we_care_for_you/data/jobs_found.csv
+[2026-09-13 01:25:13 UTC] Regenerated checklist page at /home/runner/work/Jobs_we_care_for_you/Jobs_we_care_for_you/docs/index.html (1720 total jobs)
+[2026-09-13 01:25:13 UTC] Run complete.
+
