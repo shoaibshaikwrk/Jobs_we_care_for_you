@@ -9,6 +9,8 @@ Instead this uses:
 
 - **RemoteOK** — public API, remote jobs across categories, no key needed
 - **Arbeitnow** — public API, mostly Europe-focused, no key needed (low USA yield, kept for breadth)
+- **Jobicy** — public remote-jobs API, searched by role and restricted to USA listings
+- **Himalayas** — free public remote-jobs feed with USA location filtering
 - **Greenhouse** — per-company public API, no key needed. 35 companies by default (Stripe, Airbnb, Coinbase, Databricks, Instacart, Robinhood, Anthropic, Scale AI, and more — full list in `config.json`)
 - **Lever** — per-company public API, no key needed. Defaults: Netflix, Palantir, Wealthfront, Plaid
 - **Ashby** — per-company public API, no key needed. Defaults: OpenAI, Ramp, Notion, Replit, Vercel, ClickHouse, Confluent, Zapier, Linear, Cohere, and more
