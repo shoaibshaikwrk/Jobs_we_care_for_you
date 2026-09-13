@@ -833,6 +833,9 @@ def generate_html(rows, output_path):
   .status-Rejected { border-color: #dc2626; color: #dc2626; opacity: 0.7; }
   .hidden { display: none; }
   .found-at, .source { color: #777; font-size: 0.8rem; white-space: nowrap; }
+  .filter-row th { top: 38px; padding: 5px 6px; }
+  .column-filter { width: 100%; min-width: 85px; box-sizing: border-box; padding: 5px 7px;
+                   border: 1px solid #bbb; border-radius: 5px; font-size: 0.78rem; }
 </style>
 </head>
 <body>
@@ -866,6 +869,14 @@ def generate_html(rows, output_path):
       <th>Location</th>
       <th>Source</th>
       <th>Found</th>
+    </tr>
+    <tr class="filter-row">
+      <th><input class="column-filter" data-field="status" placeholder="Filter status"></th>
+      <th><input class="column-filter" data-field="role" placeholder="Filter role/company"></th>
+      <th><input class="column-filter" data-field="visa" placeholder="Filter visa/H-1B"></th>
+      <th><input class="column-filter" data-field="location" placeholder="Filter location"></th>
+      <th><input class="column-filter" data-field="source" placeholder="Filter source"></th>
+      <th><input class="column-filter" data-field="found" placeholder="Filter date"></th>
     </tr>
   </thead>
   <tbody id="jobRows"></tbody>
@@ -902,6 +913,23 @@ function populateSourceFilter(jobs) {
   });
 }
 
+function matchesColumnFilters(job, status) {
+  const values = {
+    status: status,
+    role: (job.title || "") + " " + (job.company || ""),
+    visa: (job.visa_sponsorship || "Not stated") + " " +
+      (job.dol_h1b_sponsor || "No match") + " " + (job.dol_h1b_lca_count || 0) + " " +
+      (job.dol_h1b_worker_positions || 0) + " " + (job.dol_h1b_role_lca_count || 0),
+    location: job.location || "",
+    source: job.source || "",
+    found: (job.found_at || "").replace(" UTC", ""),
+  };
+  return [...document.querySelectorAll(".column-filter")].every(input => {
+    const query = input.value.trim().toLowerCase();
+    return !query || String(values[input.dataset.field] || "").toLowerCase().includes(query);
+  });
+}
+
 function render() {
   const search = document.getElementById("search").value.toLowerCase();
   const statusFilter = document.getElementById("statusFilter").value;
@@ -916,6 +944,7 @@ function render() {
     if (sourceFilter && job.source !== sourceFilter) return;
     const haystack = (job.title + " " + job.company).toLowerCase();
     if (search && !haystack.includes(search)) return;
+    if (!matchesColumnFilters(job, status)) return;
     visibleJobs.push(job);
 
     const tr = document.createElement("tr");
@@ -983,6 +1012,7 @@ populateSourceFilter(JOBS);
 document.getElementById("search").addEventListener("input", render);
 document.getElementById("statusFilter").addEventListener("change", render);
 document.getElementById("sourceFilter").addEventListener("change", render);
+document.querySelectorAll(".column-filter").forEach(input => input.addEventListener("input", render));
 render();
 </script>
 </body>
@@ -1060,6 +1090,9 @@ def generate_html_auth(rows, output_path, resume_url=""):
   select.status { padding: 5px 6px; border-radius: 6px; border: 1px solid #ccc; font-size: 0.85rem; }
   .applied-by { font-size: 0.75rem; color: #888; margin-top: 4px; max-width: 240px; }
   .found-at, .source { color: #777; font-size: 0.8rem; white-space: nowrap; }
+  .filter-row th { top: 38px; padding: 5px 6px; }
+  .column-filter { width: 100%; min-width: 85px; box-sizing: border-box; padding: 5px 7px;
+                   border: 1px solid #bbb; border-radius: 5px; font-size: 0.78rem; }
   .topbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
   .topbar-right { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; }
   .btn { display: inline-block; padding: 8px 16px; border-radius: 6px; border: 1px solid #888;
@@ -1149,6 +1182,15 @@ def generate_html_auth(rows, output_path, resume_url=""):
         <th>Source</th>
         <th>Found</th>
         <th>AI Resume <span class="optional-tag">(optional)</span></th>
+      </tr>
+      <tr class="filter-row">
+        <th><input class="column-filter" data-field="status" placeholder="Filter status"></th>
+        <th><input class="column-filter" data-field="role" placeholder="Filter role/company"></th>
+        <th><input class="column-filter" data-field="visa" placeholder="Filter visa/H-1B"></th>
+        <th><input class="column-filter" data-field="location" placeholder="Filter location"></th>
+        <th><input class="column-filter" data-field="source" placeholder="Filter source"></th>
+        <th><input class="column-filter" data-field="found" placeholder="Filter date"></th>
+        <th></th>
       </tr>
     </thead>
     <tbody id="jobRows"></tbody>
@@ -1526,6 +1568,23 @@ function populateSourceFilter() {
   });
 }
 
+function matchesColumnFilters(job, status) {
+  const values = {
+    status: status,
+    role: (job.title || "") + " " + (job.company || ""),
+    visa: (job.visa_sponsorship || "Not stated") + " " +
+      (job.dol_h1b_sponsor || "No match") + " " + (job.dol_h1b_lca_count || 0) + " " +
+      (job.dol_h1b_worker_positions || 0) + " " + (job.dol_h1b_role_lca_count || 0),
+    location: job.location || "",
+    source: job.source || "",
+    found: (job.found_at || "").replace(" UTC", ""),
+  };
+  return [...document.querySelectorAll(".column-filter")].every(input => {
+    const query = input.value.trim().toLowerCase();
+    return !query || String(values[input.dataset.field] || "").toLowerCase().includes(query);
+  });
+}
+
 function render() {
   const search = document.getElementById("search").value.toLowerCase();
   const statusFilter = document.getElementById("statusFilter").value;
@@ -1539,6 +1598,7 @@ function render() {
     if (sourceFilter && job.source !== sourceFilter) return;
     const haystack = (job.title + " " + job.company).toLowerCase();
     if (search && !haystack.includes(search)) return;
+    if (!matchesColumnFilters(job, status)) return;
 
     const tr = document.createElement("tr");
 
@@ -1635,6 +1695,7 @@ async function showApp() {
   document.getElementById("search").addEventListener("input", render);
   document.getElementById("statusFilter").addEventListener("change", render);
   document.getElementById("sourceFilter").addEventListener("change", render);
+  document.querySelectorAll(".column-filter").forEach(input => input.addEventListener("input", render));
   render();
 }
 
