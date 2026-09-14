@@ -878,7 +878,7 @@ def generate_html(rows, output_path, news=None):
 <h1>Top FAANGOS Jobs</h1>
 <div class="motto">“We chop our own wood, so we warm ourselves twice.”</div>
 <div class="meta">Last updated __GENERATED_AT__ &middot; regenerated automatically once a day</div>
-<div class="support-box">Found a broken or incorrect listing? <a href="mailto:support@placeonus.com?subject=Top%20FAANGOS%20Jobs%20Issue">Report an issue</a></div>
+<div class="support-box">Report an issue: <a href="mailto:support@placeonus.com?subject=Top%20FAANGOS%20Jobs%20Issue">support@placeonus.com</a></div>
 
 <div class="stats" id="stats"></div>
 
@@ -1221,7 +1221,7 @@ def generate_html_auth(rows, output_path, resume_url="", news=None):
       <h1>Top FAANGOS Jobs</h1>
       <div class="motto">“We chop our own wood, so we warm ourselves twice.”</div>
       <div class="meta">Last updated __GENERATED_AT__ &middot; regenerated automatically once a day</div>
-      <div class="support-box">Found a broken or incorrect listing? <a href="mailto:support@placeonus.com?subject=Top%20FAANGOS%20Jobs%20Issue">Report an issue</a></div>
+      <div class="support-box">Report an issue: <a href="mailto:support@placeonus.com?subject=Top%20FAANGOS%20Jobs%20Issue">support@placeonus.com</a></div>
     </div>
     <div class="topbar-right">
       <button class="btn" id="resumeBtn">My Resume</button>
