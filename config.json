@@ -45,11 +45,8 @@
   "usa_only": true,
   "remote_only": false,
   "location_includes": [],
+  "remove_sources": ["RemoteOK", "Arbeitnow", "Jobicy", "Himalayas", "Adzuna"],
   "sources": {
-    "remoteok": true,
-    "arbeitnow": true,
-    "jobicy": true,
-    "himalayas": true,
     "greenhouse_companies": [
       "stripe",
       "airbnb",
@@ -150,12 +147,6 @@
       "cache_dir": ".cache/h1b",
       "_note": "Set enabled to true for local DOL H-1B enrichment; the first run downloads about 240 MB."
     },
-    "adzuna": {
-      "enabled": false,
-      "app_id": "",
-      "app_key": "",
-      "_note": "Free key at https://developer.adzuna.com/ - set enabled to true once you add app_id/app_key. Aggregates many US job boards in one call. This is the single biggest lever for more volume."
-    },
     "usajobs": {
       "enabled": false,
       "email": "",
@@ -167,7 +158,7 @@
     "google": true,
     "apple": true
   },
-  "output_csv": "/Users/shoaibshaik/Desktop/job_applcation/jobs_found.csv",
-  "seen_jobs_file": "/Users/shoaibshaik/Desktop/job_applcation/seen_jobs.json",
-  "log_file": "/Users/shoaibshaik/Desktop/job_applcation/run_log.txt"
+  "output_csv": "data/jobs_found.csv",
+  "seen_jobs_file": "data/seen_jobs.json",
+  "log_file": "data/run_log.txt"
 }

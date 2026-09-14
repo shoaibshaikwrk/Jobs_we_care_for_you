@@ -45,11 +45,8 @@
   "usa_only": true,
   "remote_only": false,
   "location_includes": [],
+  "remove_sources": ["RemoteOK", "Arbeitnow", "Jobicy", "Himalayas", "Adzuna"],
   "sources": {
-    "remoteok": true,
-    "arbeitnow": true,
-    "jobicy": true,
-    "himalayas": true,
     "greenhouse_companies": [
       "stripe",
       "airbnb",
@@ -150,17 +147,11 @@
       "cache_dir": ".cache/h1b",
       "_note": "Official cumulative FY2026 Q3 LCA disclosure data through June 30, 2026."
     },
-    "adzuna": {
-      "enabled": false,
-      "app_id": "",
-      "app_key": "",
-      "_note": "Leave blank here. Add ADZUNA_APP_ID / ADZUNA_APP_KEY as GitHub repo secrets instead — the workflow passes them in as environment variables so no key is ever committed to the repo."
-    },
     "usajobs": {
       "enabled": false,
       "email": "",
       "api_key": "",
-      "_note": "Leave blank here. Add USAJOBS_EMAIL / USAJOBS_API_KEY as GitHub repo secrets instead — same reasoning as Adzuna above."
+      "_note": "Leave blank here. Add USAJOBS_EMAIL / USAJOBS_API_KEY as GitHub repo secrets so no key is committed to the repository."
     },
     "amazon": true,
     "netflix": true,

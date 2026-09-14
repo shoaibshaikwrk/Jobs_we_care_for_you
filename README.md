@@ -1,16 +1,11 @@
 # Job Checker — Data Engineering / AI Engineer (USA)
 
-A small local Python script that checks **twelve** free, legitimate job sources for new
+A small local Python script that checks official employer career sites and government sources for new
 **Data Engineer** / **AI Engineer** / **ML Engineer** / **Analytics Engineer** postings,
 filters them down to **USA-only** listings, and appends any *new* matches to a CSV
 file that doubles as your **application checklist**. Nothing is scraped from LinkedIn
 or Indeed — those actively block bots and it would violate their Terms of Service.
-Instead this uses:
-
-- **RemoteOK** — public API, remote jobs across categories, no key needed
-- **Arbeitnow** — public API, mostly Europe-focused, no key needed (low USA yield, kept for breadth)
-- **Jobicy** — public remote-jobs API, searched by role and restricted to USA listings
-- **Himalayas** — free public remote-jobs feed with USA location filtering
+Instead this uses only official employer career sites, their authorized ATS feeds, and government data:
 - **Greenhouse** — per-company public API, no key needed. 35 companies by default (Stripe, Airbnb, Coinbase, Databricks, Instacart, Robinhood, Anthropic, Scale AI, and more — full list in `config.json`)
 - **Lever** — per-company public API, no key needed. Defaults: Netflix, Palantir, Wealthfront, Plaid
 - **Ashby** — per-company public API, no key needed. Defaults: OpenAI, Ramp, Notion, Replit, Vercel, ClickHouse, Confluent, Zapier, Linear, Cohere, and more
@@ -21,7 +16,6 @@ Instead this uses:
 - **Netflix** — public careers API
 - **Google** — parsed directly from `google.com/about/careers`, US-scoped
 - **Apple** — parsed directly from `jobs.apple.com`, filtered to known US office cities
-- **Adzuna** — broad aggregator covering many boards at once, US-scoped search. *Optional, needs a free key*
 - **USAJobs** — official US federal government postings, inherently US-only. *Optional, needs a free key*
 
 (Meta was evaluated but skipped — its job search requires session-bound
@@ -30,9 +24,8 @@ replicated from a stateless scheduled script without running a full headless
 browser daily.)
 
 All company lists live in `config.json` — add, remove, or swap any of them. With the
-current defaults across all these sources, a test run pulled over 13,000 raw postings
-and matched 672 real USA-based openings — enabling Adzuna and USAJobs on top of that
-will push it higher still.
+current defaults search thousands of official career-page postings and retain matching
+USA-based openings. Third-party job aggregators are intentionally excluded.
 
 The hosted website version (see below) also adds:
 - **Visa sponsorship signals** — each new posting is labeled `Yes`, `No`, or
@@ -104,17 +97,7 @@ dependency (`requests`).
 | `remote_only` | Set `true` to additionally require the word "remote" in the location. |
 | `location_includes` | Leave empty (`[]`) for no extra narrowing, or add strings like `"California"`, `"New York"` to further restrict within the USA. |
 | `sources.greenhouse_companies` / `lever_companies` / `ashby_companies` | Company board "slugs" — the string in the company's careers URL, e.g. `https://boards.greenhouse.io/anthropic` → slug is `anthropic`. Not every company uses every platform — an unmatched slug is logged as "no board found" and skipped, it won't crash the run. |
-| `sources.adzuna` | Set `enabled: true` and fill in `app_id`/`app_key` to turn this on — see below. |
 | `sources.usajobs` | Set `enabled: true` and fill in `email`/`api_key` to turn this on — see below. |
-
-### Turning on Adzuna (recommended — biggest coverage boost)
-
-Adzuna aggregates postings from many boards behind one API, searched directly against
-its US-only endpoint, so it's a fast way to see far more listings:
-
-1. Register free at https://developer.adzuna.com/ (takes ~2 minutes).
-2. Copy your `app_id` and `app_key` into `config.json` under `sources.adzuna`.
-3. Set `"enabled": true`.
 
 ### Turning on USAJobs (official federal postings)
 
@@ -138,8 +121,8 @@ Each run:
 4. Appends only the **new** matches to `jobs_found.csv`, each starting with status `To Apply`.
 5. Updates `seen_jobs.json` and `run_log.txt`.
 
-Output is saved to **`/Users/shoaibshaik/Desktop/job_applcation/`** (the folder is
-created automatically the first time you run the script if it doesn't already exist).
+Output is saved to the project's **`data/`** folder, which is created automatically
+the first time you run the script if it does not already exist.
 
 ## Using jobs_found.csv as your application checklist
 

@@ -7,21 +7,19 @@ postings that match keywords in config.json, filters them down to USA-only
 listings, and appends any NEW matches (not seen on a previous run) to a local
 CSV file that doubles as your application checklist.
 
-Sources used (no scraping of LinkedIn/Indeed — those block bots and it violates
-their Terms of Service):
-  - RemoteOK public API      (https://remoteok.com/api)
-  - Arbeitnow public API     (https://www.arbeitnow.com/api/job-board-api)
+Sources used (official employer career sites, authorized ATS feeds, and government data):
   - Greenhouse job boards    (per-company public API, no key needed)
   - Lever job boards         (per-company public API, no key needed)
   - Ashby job boards         (per-company public API, no key needed)
-  - Adzuna                   (broad job aggregator, free API key, US-scoped search)
+  - SmartRecruiters, Workable, and Recruitee employer boards
+  - Amazon, Netflix, Google, and Apple career sites
   - USAJobs                  (official US federal government jobs, free API key)
 
 Usage:
     python3 job_checker.py [path/to/config.json]
 
 Designed to be run manually or on a schedule (cron / Windows Task Scheduler).
-See README.md for scheduling instructions and how to get free Adzuna/USAJobs keys.
+See README.md for scheduling instructions and how to get a free USAJobs key.
 """
 
 import csv
@@ -137,6 +135,38 @@ def deduplicate_csv(path):
             writer.writeheader()
             writer.writerows(merged[job_id] for job_id in order)
         os.replace(temp_path, path)
+    return removed
+
+
+def remove_csv_sources(path, source_names):
+    """Remove historical rows from retired/non-official listing sources."""
+    if not source_names or not os.path.exists(path) or os.path.getsize(path) == 0:
+        return 0
+    ensure_csv_schema(path)
+    with open(path, "r", newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    blocked = {name.casefold() for name in source_names}
+    kept = [row for row in rows if row.get("source", "").casefold() not in blocked]
+    removed = len(rows) - len(kept)
+    if removed:
+        temp_path = path + ".sources-cleanup"
+        with open(temp_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(kept)
+        os.replace(temp_path, path)
+    return removed
+
+
+def remove_seen_prefixes(path, prefixes):
+    """Forget IDs belonging to retired sources so the state matches the CSV."""
+    if not prefixes or not os.path.exists(path):
+        return 0
+    seen_ids = load_seen(path)
+    kept = {job_id for job_id in seen_ids if not any(job_id.startswith(p) for p in prefixes)}
+    removed = len(seen_ids) - len(kept)
+    if removed:
+        save_seen(path, kept)
     return removed
 
 # ---------------------------------------------------------------------------
@@ -260,115 +290,10 @@ def matches_location(location, location_includes):
 # Source fetchers. Each returns a list of dicts:
 # {id, title, company, location, url, source, us_confirmed}
 # "us_confirmed" = True means the source itself guarantees US-only results
-# (e.g. Adzuna's /us/ endpoint, USAJobs), so the USA location heuristic is
+# (e.g. USAJobs), so the USA location heuristic is
 # skipped for those rows to avoid dropping valid jobs with ambiguous location
 # text. Every fetcher is wrapped so a failure in one source doesn't stop others.
 # ---------------------------------------------------------------------------
-
-def fetch_remoteok():
-    jobs = []
-    try:
-        resp = requests.get("https://remoteok.com/api", headers=HEADERS, timeout=20)
-        resp.raise_for_status()
-        data = resp.json()
-        for item in data:
-            if not isinstance(item, dict) or "id" not in item:
-                continue
-            jobs.append({
-                "id": f"remoteok_{item.get('id')}",
-                "title": item.get("position", ""),
-                "company": item.get("company", ""),
-                "location": item.get("location", "Remote"),
-                "url": item.get("url", ""),
-                "source": "RemoteOK",
-                "description": item.get("description", ""),
-                "us_confirmed": False,
-            })
-    except Exception as e:
-        print(f"  [remoteok] fetch failed: {e}")
-    return jobs
-
-
-def fetch_arbeitnow():
-    jobs = []
-    try:
-        resp = requests.get(
-            "https://www.arbeitnow.com/api/job-board-api", headers=HEADERS, timeout=20
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        for item in data.get("data", []):
-            jobs.append({
-                "id": f"arbeitnow_{item.get('slug')}",
-                "title": item.get("title", ""),
-                "company": item.get("company_name", ""),
-                "location": item.get("location", ""),
-                "url": item.get("url", ""),
-                "source": "Arbeitnow",
-                "description": item.get("description", ""),
-                "us_confirmed": False,
-            })
-    except Exception as e:
-        print(f"  [arbeitnow] fetch failed: {e}")
-    return jobs
-
-
-def fetch_jobicy(keywords, results_per_keyword=50):
-    """Jobicy's public API; source attribution and links are preserved."""
-    jobs = []
-    for keyword in keywords:
-        try:
-            response = requests.get(
-                "https://jobicy.com/api/v2/remote-jobs",
-                params={"count": results_per_keyword, "geo": "usa", "tag": keyword},
-                headers=HEADERS,
-                timeout=20,
-            )
-            response.raise_for_status()
-            for item in response.json().get("jobs", []):
-                jobs.append({
-                    "id": f"jobicy_{item.get('id')}",
-                    "title": item.get("jobTitle", ""),
-                    "company": item.get("companyName", ""),
-                    "location": item.get("jobGeo", "USA"),
-                    "url": item.get("url", ""),
-                    "source": "Jobicy",
-                    "description": item.get("jobDescription", ""),
-                    "us_confirmed": True,
-                })
-        except Exception as error:
-            print(f"  [jobicy:{keyword}] fetch failed: {error}")
-    return jobs
-
-
-def fetch_himalayas(results_limit=1000):
-    """Latest remote roles from the free public Himalayas feed."""
-    jobs = []
-    try:
-        response = requests.get(
-            "https://himalayas.app/jobs/api",
-            params={"limit": results_limit},
-            headers=HEADERS,
-            timeout=30,
-        )
-        response.raise_for_status()
-        for item in response.json().get("jobs", []):
-            restrictions = item.get("locationRestrictions") or []
-            location = ", ".join(restrictions) or "Remote"
-            jobs.append({
-                "id": f"himalayas_{item.get('guid') or item.get('applicationLink')}",
-                "title": item.get("title", ""),
-                "company": item.get("companyName", ""),
-                "location": location,
-                "url": item.get("applicationLink", ""),
-                "source": "Himalayas",
-                "description": item.get("description", ""),
-                "us_confirmed": any("united states" in str(value).lower() for value in restrictions),
-            })
-    except Exception as error:
-        print(f"  [himalayas] fetch failed: {error}")
-    return jobs
-
 
 def fetch_greenhouse(company):
     jobs = []
@@ -788,47 +713,6 @@ def fetch_apple(keywords, results_per_keyword=50):
     return jobs
 
 
-def fetch_adzuna(app_id, app_key, keywords, results_per_keyword=50):
-    """Adzuna aggregates postings from many boards. We hit their US-scoped
-    endpoint directly (country code 'us' in the URL) and search per-keyword,
-    so results are US jobs by construction — no extra location filtering needed.
-    Requires a free key from https://developer.adzuna.com/
-    """
-    jobs = []
-    if not app_id or not app_key:
-        return jobs
-    for kw in keywords:
-        try:
-            resp = requests.get(
-                "https://api.adzuna.com/v1/api/jobs/us/search/1",
-                params={
-                    "app_id": app_id,
-                    "app_key": app_key,
-                    "what": kw,
-                    "results_per_page": results_per_keyword,
-                    "content-type": "application/json",
-                },
-                headers=HEADERS,
-                timeout=20,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            for item in data.get("results", []):
-                jobs.append({
-                    "id": f"adzuna_{item.get('id')}",
-                    "title": item.get("title", ""),
-                    "company": (item.get("company") or {}).get("display_name", ""),
-                    "location": (item.get("location") or {}).get("display_name", ""),
-                    "url": item.get("redirect_url", ""),
-                    "source": "Adzuna",
-                    "description": item.get("description", ""),
-                    "us_confirmed": True,
-                })
-        except Exception as e:
-            print(f"  [adzuna:{kw}] fetch failed: {e}")
-    return jobs
-
-
 def fetch_usajobs(email, api_key, keywords, results_per_keyword=50):
     """Official US federal government jobs. Inherently US-only.
     Requires a free key from https://developer.usajobs.gov/APIRequest/Index
@@ -943,8 +827,9 @@ def generate_html(rows, output_path, news=None):
 <title>Top FAANGOS Jobs</title>
 <style>
   :root { color-scheme: light dark; }
+  *, *::before, *::after { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-         max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; line-height: 1.4; }
+         width: 100%; max-width: 1800px; margin: 0 auto; padding: clamp(12px, 2vw, 28px); line-height: 1.4; overflow-x: hidden; }
   h1 { font-size: 1.5rem; margin-bottom: 4px; }
   .meta { color: #666; font-size: 0.85rem; margin-bottom: 20px; }
   .stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
@@ -953,7 +838,7 @@ def generate_html(rows, output_path, news=None):
   .controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
   input[type=text] { padding: 7px 10px; border: 1px solid #ccc; border-radius: 6px; min-width: 220px; }
   select.filter { padding: 7px 10px; border: 1px solid #ccc; border-radius: 6px; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+  table { width: 100%; min-width: 1050px; border-collapse: collapse; font-size: 0.92rem; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e2e2e2; vertical-align: top; }
   th { position: sticky; top: 0; background: Canvas; cursor: default; }
   tr:hover { background: rgba(127,127,127,0.08); }
@@ -972,8 +857,8 @@ def generate_html(rows, output_path, news=None):
   .filter-row th { top: 38px; padding: 5px 6px; }
   .column-filter { width: 100%; min-width: 85px; box-sizing: border-box; padding: 5px 7px;
                    border: 1px solid #bbb; border-radius: 5px; font-size: 0.78rem; }
-  .content-grid { display: grid; grid-template-columns: minmax(0,1fr) 330px; gap: 18px; align-items: start; }
-  .table-panel { min-width: 0; overflow-x: auto; }
+  .content-grid { width: 100%; display: grid; grid-template-columns: minmax(0,1fr) minmax(270px, 22vw); gap: clamp(12px, 1.5vw, 24px); align-items: start; }
+  .table-panel { width: 100%; min-width: 0; overflow-x: auto; overscroll-behavior-inline: contain; }
   .news-sidebar { max-height: 720px; overflow-y: auto; position: sticky; top: 12px; border: 1px solid #ccc;
                   border-radius: 10px; padding: 12px; background: Canvas; }
   .news-sidebar h2 { margin: 0 0 4px; font-size: 1.1rem; }
@@ -982,13 +867,18 @@ def generate_html(rows, output_path, news=None):
   .news-item a { font-size: .84rem; font-weight: 600; text-decoration: none; }
   .news-meta { color: #777; font-size: .72rem; margin-top: 3px; }
   .motto { font-style: italic; margin: 4px 0 12px; color: #555; }
-  @media (max-width: 900px) { .content-grid { grid-template-columns: 1fr; } .news-sidebar { position: static; max-height: 420px; } }
+  .support-box { display: inline-block; margin: 0 0 18px; padding: 8px 12px; border: 1px solid #ccc;
+                 border-radius: 8px; font-size: .85rem; background: rgba(127,127,127,.06); }
+  .support-box a { font-weight: 600; }
+  @media (max-width: 1050px) { .content-grid { grid-template-columns: 1fr; } .news-sidebar { position: static; max-height: 420px; } }
+  @media (max-width: 600px) { body { padding: 12px; } .controls > * { width: 100%; min-width: 0; } .stat { flex: 1 1 45%; } }
 </style>
 </head>
 <body>
 <h1>Top FAANGOS Jobs</h1>
 <div class="motto">“We chop our own wood, so we warm ourselves twice.”</div>
 <div class="meta">Last updated __GENERATED_AT__ &middot; regenerated automatically once a day</div>
+<div class="support-box">Found a broken or incorrect listing? <a href="mailto:support@placeonus.com?subject=Top%20FAANGOS%20Jobs%20Issue">Report an issue</a></div>
 
 <div class="stats" id="stats"></div>
 
@@ -1239,8 +1129,9 @@ def generate_html_auth(rows, output_path, resume_url="", news=None):
 <script src="firebase-config.js"></script>
 <style>
   :root { color-scheme: light dark; }
+  *, *::before, *::after { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-         max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; line-height: 1.4; }
+         width: 100%; max-width: 1800px; margin: 0 auto; padding: clamp(12px, 2vw, 28px); line-height: 1.4; overflow-x: hidden; }
   h1 { font-size: 1.5rem; margin-bottom: 4px; }
   .meta { color: #666; font-size: 0.85rem; margin-bottom: 20px; }
   .stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
@@ -1249,7 +1140,7 @@ def generate_html_auth(rows, output_path, resume_url="", news=None):
   .controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
   input[type=text], input[type=email] { padding: 7px 10px; border: 1px solid #ccc; border-radius: 6px; min-width: 220px; }
   select.filter { padding: 7px 10px; border: 1px solid #ccc; border-radius: 6px; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+  table { width: 100%; min-width: 1050px; border-collapse: collapse; font-size: 0.92rem; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e2e2e2; vertical-align: top; }
   th { position: sticky; top: 0; background: Canvas; cursor: default; }
   tr:hover { background: rgba(127,127,127,0.08); }
@@ -1262,8 +1153,8 @@ def generate_html_auth(rows, output_path, resume_url="", news=None):
   .filter-row th { top: 38px; padding: 5px 6px; }
   .column-filter { width: 100%; min-width: 85px; box-sizing: border-box; padding: 5px 7px;
                    border: 1px solid #bbb; border-radius: 5px; font-size: 0.78rem; }
-  .content-grid { display: grid; grid-template-columns: minmax(0,1fr) 330px; gap: 18px; align-items: start; }
-  .table-panel { min-width: 0; overflow-x: auto; }
+  .content-grid { width: 100%; display: grid; grid-template-columns: minmax(0,1fr) minmax(270px, 22vw); gap: clamp(12px, 1.5vw, 24px); align-items: start; }
+  .table-panel { width: 100%; min-width: 0; overflow-x: auto; overscroll-behavior-inline: contain; }
   .news-sidebar { max-height: 720px; overflow-y: auto; position: sticky; top: 12px; border: 1px solid #ccc;
                   border-radius: 10px; padding: 12px; background: Canvas; }
   .news-sidebar h2 { margin: 0 0 4px; font-size: 1.1rem; }
@@ -1272,7 +1163,11 @@ def generate_html_auth(rows, output_path, resume_url="", news=None):
   .news-item a { font-size: .84rem; font-weight: 600; text-decoration: none; }
   .news-meta { color: #777; font-size: .72rem; margin-top: 3px; }
   .motto { font-style: italic; margin: 4px 0 12px; color: #555; }
-  @media (max-width: 900px) { .content-grid { grid-template-columns: 1fr; } .news-sidebar { position: static; max-height: 420px; } }
+  .support-box { display: inline-block; margin: 0 0 18px; padding: 8px 12px; border: 1px solid #ccc;
+                 border-radius: 8px; font-size: .85rem; background: rgba(127,127,127,.06); }
+  .support-box a { font-weight: 600; }
+  @media (max-width: 1050px) { .content-grid { grid-template-columns: 1fr; } .news-sidebar { position: static; max-height: 420px; } }
+  @media (max-width: 600px) { body { padding: 12px; } .controls > * { width: 100%; min-width: 0; } .stat { flex: 1 1 45%; } .topbar-right { width: 100%; } }
   .topbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
   .topbar-right { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; }
   .btn { display: inline-block; padding: 8px 16px; border-radius: 6px; border: 1px solid #888;
@@ -1326,6 +1221,7 @@ def generate_html_auth(rows, output_path, resume_url="", news=None):
       <h1>Top FAANGOS Jobs</h1>
       <div class="motto">“We chop our own wood, so we warm ourselves twice.”</div>
       <div class="meta">Last updated __GENERATED_AT__ &middot; regenerated automatically once a day</div>
+      <div class="support-box">Found a broken or incorrect listing? <a href="mailto:support@placeonus.com?subject=Top%20FAANGOS%20Jobs%20Issue">Report an issue</a></div>
     </div>
     <div class="topbar-right">
       <button class="btn" id="resumeBtn">My Resume</button>
@@ -1971,22 +1867,6 @@ def main():
 
     all_jobs = []
 
-    if sources_cfg.get("remoteok"):
-        print("Fetching RemoteOK...")
-        all_jobs.extend(fetch_remoteok())
-
-    if sources_cfg.get("arbeitnow"):
-        print("Fetching Arbeitnow...")
-        all_jobs.extend(fetch_arbeitnow())
-
-    if sources_cfg.get("jobicy"):
-        print("Fetching Jobicy...")
-        all_jobs.extend(fetch_jobicy(keywords))
-
-    if sources_cfg.get("himalayas"):
-        print("Fetching Himalayas...")
-        all_jobs.extend(fetch_himalayas())
-
     for company in sources_cfg.get("greenhouse_companies", []):
         print(f"Fetching Greenhouse board: {company}...")
         all_jobs.extend(fetch_greenhouse(company))
@@ -2026,17 +1906,6 @@ def main():
     if sources_cfg.get("apple"):
         print("Fetching Apple...")
         all_jobs.extend(fetch_apple(keywords))
-
-    # Credentials can come from config.json OR environment variables (e.g. GitHub
-    # Actions secrets) — env vars take precedence so keys never need to be committed
-    # to the repo. Having either the env var pair or "enabled": true + filled-in
-    # config values is enough to turn a source on.
-    adzuna_cfg = sources_cfg.get("adzuna", {})
-    adzuna_app_id = os.environ.get("ADZUNA_APP_ID") or adzuna_cfg.get("app_id", "")
-    adzuna_app_key = os.environ.get("ADZUNA_APP_KEY") or adzuna_cfg.get("app_key", "")
-    if adzuna_cfg.get("enabled") or (adzuna_app_id and adzuna_app_key):
-        print("Fetching Adzuna (US)...")
-        all_jobs.extend(fetch_adzuna(adzuna_app_id, adzuna_app_key, keywords))
 
     usajobs_cfg = sources_cfg.get("usajobs", {})
     usajobs_email = os.environ.get("USAJOBS_EMAIL") or usajobs_cfg.get("email", "")
@@ -2096,6 +1965,17 @@ def main():
     else:
         for job in filtered:
             job.update(lookup_dol_h1b("", "", {}))
+
+    retired_sources = config.get("remove_sources", [])
+    removed_retired = remove_csv_sources(output_csv, retired_sources)
+    retired_prefixes = tuple(f"{name.casefold()}_" for name in retired_sources)
+    removed_seen = remove_seen_prefixes(seen_path, retired_prefixes)
+    if removed_retired or removed_seen:
+        log(
+            f"Removed {removed_retired} historical row(s) and {removed_seen} seen ID(s) "
+            "from retired listing sources",
+            log_path,
+        )
 
     removed_duplicates = deduplicate_csv(output_csv)
     if removed_duplicates:
