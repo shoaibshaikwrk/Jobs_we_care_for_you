@@ -729,3 +729,8 @@
 [2026-11-26 22:07:22 UTC] Regenerated checklist page at /home/runner/work/Jobs_we_care_for_you/Jobs_we_care_for_you/docs/index.html (3010 total jobs)
 [2026-11-26 22:07:22 UTC] Run complete.
 
+[2026-11-27 21:47:28 UTC] Starting job check run...
+[2026-11-27 21:48:38 UTC] Added 2 new job(s) to /home/runner/work/Jobs_we_care_for_you/Jobs_we_care_for_you/data/jobs_found.csv
+[2026-11-27 21:48:39 UTC] Regenerated checklist page at /home/runner/work/Jobs_we_care_for_you/Jobs_we_care_for_you/docs/index.html (3012 total jobs)
+[2026-11-27 21:48:39 UTC] Run complete.
+
